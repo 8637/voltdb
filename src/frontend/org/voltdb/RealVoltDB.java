@@ -1619,8 +1619,7 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
             //kfactors per partitions in the deployment config
             PartitionKFactorType pkfType = m_catalogContext.getDeployment().getKfactors();
             Map<Integer, Integer> pkfs = Maps.newHashMap();
-            if (pkfType != null) {
-                hostLog.info("Mixed K safety factor for partition is found");
+            if (pkfType != null && pkfType.isEnabled()) {
                 for(PartitionKFactorType.Partition p : pkfType.getPartition()) {
                     pkfs.put(p.getId(), p.getKfactor());
                 }
