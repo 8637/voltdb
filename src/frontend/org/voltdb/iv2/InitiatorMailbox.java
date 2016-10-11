@@ -34,13 +34,14 @@ import org.voltdb.VoltZK;
 import org.voltdb.messaging.CompleteTransactionMessage;
 import org.voltdb.messaging.DumpMessage;
 import org.voltdb.messaging.FragmentTaskMessage;
+import org.voltdb.messaging.DummyTransactionTaskMessage;
 import org.voltdb.messaging.Iv2InitiateTaskMessage;
 import org.voltdb.messaging.Iv2RepairLogRequestMessage;
 import org.voltdb.messaging.Iv2RepairLogResponseMessage;
 import org.voltdb.messaging.RejoinMessage;
+import org.voltdb.messaging.RepairLogTruncationMessage;
 
 import com.google_voltpatches.common.base.Supplier;
-import org.voltdb.messaging.RepairLogTruncationMessage;
 
 /**
  * InitiatorMailbox accepts initiator work and proxies it to the
@@ -406,6 +407,9 @@ public class InitiatorMailbox implements Mailbox
             // ignore it, or we need to clean up, or we'll be restarting and it doesn't matter.  Make sure they
             // get into the repair log and then let them run their course.
             m_repairLog.deliver(repairWork);
+            m_scheduler.handleMessageRepair(needsRepair, repairWork);
+        }
+        else if (repairWork instanceof DummyTransactionTaskMessage) {
             m_scheduler.handleMessageRepair(needsRepair, repairWork);
         }
         else {

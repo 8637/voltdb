@@ -29,6 +29,7 @@ import java.util.concurrent.Future;
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.VoltMessage;
 import org.voltcore.utils.CoreUtils;
+import org.voltdb.messaging.DummyTransactionTaskMessage;
 import org.voltdb.messaging.Iv2RepairLogRequestMessage;
 import org.voltdb.messaging.Iv2RepairLogResponseMessage;
 
@@ -236,6 +237,8 @@ public class SpPromoteAlgo implements RepairAlgo
                 m_mailbox.repairReplicasWith(needsRepair, li.getPayload());
             }
         }
+        List<Long> repairAll = new ArrayList<>(m_replicaRepairStructs.keySet());
+        m_mailbox.repairReplicasWith(repairAll, new DummyTransactionTaskMessage());
         tmLog.debug(m_whoami + "finished queuing " + queued + " replica repair messages.");
 
         m_promotionResult.set(new RepairResult(m_maxSeenTxnId));

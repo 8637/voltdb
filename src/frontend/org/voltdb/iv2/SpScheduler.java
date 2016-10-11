@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Queue;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -53,6 +54,8 @@ import org.voltdb.iv2.SiteTasker.SiteTaskerRunnable;
 import org.voltdb.messaging.BorrowTaskMessage;
 import org.voltdb.messaging.CompleteTransactionMessage;
 import org.voltdb.messaging.CompleteTransactionResponseMessage;
+import org.voltdb.messaging.DummyTransactionResponseMessage;
+import org.voltdb.messaging.DummyTransactionTaskMessage;
 import org.voltdb.messaging.DumpMessage;
 import org.voltdb.messaging.FragmentResponseMessage;
 import org.voltdb.messaging.FragmentTaskMessage;
@@ -400,6 +403,12 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
         else if (message instanceof DumpMessage) {
             handleDumpMessage();
         }
+        else if (message instanceof DummyTransactionTaskMessage) {
+            handleIv2DumpSyncTaskMessage(null, (DummyTransactionTaskMessage) message);
+        }
+        else if (message instanceof DummyTransactionResponseMessage) {
+
+        }
         else {
             throw new RuntimeException("UNKNOWN MESSAGE TYPE, BOOM!");
         }
@@ -593,6 +602,9 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
         else if (message instanceof CompleteTransactionMessage) {
             // It should be safe to just send CompleteTransactionMessages to everyone.
             handleCompleteTransactionMessage((CompleteTransactionMessage)message);
+        }
+        else if (message instanceof DummyTransactionTaskMessage) {
+            handleIv2DumpSyncTaskMessage(needsRepair, (DummyTransactionTaskMessage)message);
         }
         else {
             throw new RuntimeException("SpScheduler.handleMessageRepair received unexpected message type: " +
@@ -1142,6 +1154,91 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
             }
         }
     }
+
+    public void handleIv2DumpSyncTaskMessage(List<Long> needsRepair, DummyTransactionTaskMessage message)
+    {
+        DummyTransactionTaskMessage msg = message;
+        long uniqueId, newSpHandle;
+        if (m_isLeader) {
+            TxnEgo ego = advanceTxnEgo();
+            newSpHandle = ego.getTxnId();
+            uniqueId = m_uniqueIdGenerator.getNextUniqueId();
+
+            msg = new DummyTransactionTaskMessage(m_mailbox.getHSId(),
+                    m_mailbox.getHSId(), newSpHandle, uniqueId);
+            msg.setSpHandle(newSpHandle);
+
+            if (m_sendToHSIds.length > 0) {
+                needsRepair.remove(m_mailbox.getHSId());
+                List<Long> expectedHSIds = new ArrayList<Long>(needsRepair);
+
+                DummyTransactionTaskMessage replmsg =
+                        new DummyTransactionTaskMessage(
+                                m_mailbox.getHSId(),
+                                m_mailbox.getHSId(),
+                                msg.getTxnId(),
+                                msg.getUniqueId());
+                replmsg.setSpHandle(newSpHandle);
+                m_mailbox.send(m_sendToHSIds, replmsg);
+
+                if (expectedHSIds.size() != m_sendToHSIds.length) {
+                    Set<Long> set1 = new HashSet<Long>(expectedHSIds);
+                    Set<Long> set2 = new HashSet<Long>();
+                    for (int i = 0; i < m_sendToHSIds.length; i++) {
+                        set2.add(m_sendToHSIds[i]);
+                    }
+
+                    com.google_voltpatches.common.collect.Sets.SetView<Long> difference
+                        = com.google_voltpatches.common.collect.Sets.difference(set1, set2);
+
+                    if (!difference.isEmpty()) {
+                        throw new RuntimeException("[handleIv2DumpSyncTaskMessage] replica list is not the same,"
+                                + " pass in: " + set1.toString() + ", internal: " + set2.toString());
+                    }
+                }
+
+                DuplicateCounter counter = new DuplicateCounter(
+                        HostMessenger.VALHALLA,
+                        msg.getTxnId(),
+                        m_replicaHSIds,
+                        msg);
+
+                safeAddToDuplicateCounterMap(new DuplicateCounterKey(msg.getTxnId(), newSpHandle), counter);
+            }
+
+        } else {
+            setMaxSeenTxnId(message.getSpHandle());
+            newSpHandle = message.getSpHandle();
+        }
+
+        DummyTransactionTask task = new DummyTransactionTask(m_mailbox,
+                new SpTransactionState(msg), m_pendingTasks);
+        m_pendingTasks.offer(task);
+    }
+
+    public void handleIv2DumpSyncTaskMessage(DummyTransactionResponseMessage message) {
+        final long spHandle = message.getSpHandle();
+        final DuplicateCounterKey dcKey = new DuplicateCounterKey(message.getTxnId(), spHandle);
+        DuplicateCounter counter = m_duplicateCounters.get(dcKey);
+        if (counter != null) {
+            int result = counter.offer(message);
+            if (result == DuplicateCounter.DONE) {
+                m_duplicateCounters.remove(dcKey);
+                setRepairLogTruncationHandle(spHandle);
+                m_mailbox.send(counter.m_destinationId, counter.getLastResponse());
+            }
+            else if (result == DuplicateCounter.MISMATCH) {
+                VoltDB.crashGlobalVoltDB("HASH MISMATCH: replicas produced different results.", true, null);
+            }
+        }
+        else {
+            // the initiatorHSId is the ClientInterface mailbox.
+            // this will be on SPI without k-safety or replica only with k-safety
+            setRepairLogTruncationHandle(spHandle);
+            m_mailbox.send(message.getInitiatorHSId(), message);
+        }
+    }
+
 
     @Override
     public void setCommandLog(CommandLog cl) {
