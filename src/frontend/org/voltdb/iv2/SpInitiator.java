@@ -40,6 +40,7 @@ import org.voltdb.VoltZK;
 import org.voltdb.export.ExportManager;
 import org.voltdb.iv2.RepairAlgo.RepairResult;
 import org.voltdb.iv2.SpScheduler.DurableUniqueIdListener;
+import org.voltdb.messaging.DummyTransactionTaskMessage;
 
 import com.google_voltpatches.common.collect.ImmutableMap;
 
@@ -175,6 +176,9 @@ public class SpInitiator extends BaseInitiator implements Promotable
                     LeaderCacheWriter iv2masters = new LeaderCache(m_messenger.getZK(),
                             m_zkMailboxNode);
                     iv2masters.put(m_partitionId, m_initiatorMailbox.getHSId());
+
+                    //
+                    m_initiatorMailbox.deliver(new DummyTransactionTaskMessage());
                 }
                 else {
                     // The only known reason to fail is a failed replica during

@@ -55,6 +55,7 @@ public class DummyTransactionTaskMessage extends TransactionInfoBaseMessage
     public void flattenToBuffer(ByteBuffer buf) throws IOException
     {
         buf.put(VoltDbMessageFactory.IV2_DUMP_SYNC_TASK_ID);
+        super.flattenToBuffer(buf);
 
         assert(buf.capacity() == buf.position());
         buf.limit(buf.position());
@@ -62,6 +63,8 @@ public class DummyTransactionTaskMessage extends TransactionInfoBaseMessage
 
     @Override
     public void initFromBuffer(ByteBuffer buf) throws IOException {
+        super.initFromBuffer(buf);
+        assert(buf.capacity() == buf.position());
     }
 
     @Override

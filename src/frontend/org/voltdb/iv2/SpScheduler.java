@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Queue;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -404,10 +403,10 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
             handleDumpMessage();
         }
         else if (message instanceof DummyTransactionTaskMessage) {
-            handleIv2DumpSyncTaskMessage(null, (DummyTransactionTaskMessage) message);
+            handleDummyTransactionTaskMessage((DummyTransactionTaskMessage) message);
         }
         else if (message instanceof DummyTransactionResponseMessage) {
-
+            handleDummyTransactionResponseMessage((DummyTransactionResponseMessage)message);
         }
         else {
             throw new RuntimeException("UNKNOWN MESSAGE TYPE, BOOM!");
@@ -602,9 +601,6 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
         else if (message instanceof CompleteTransactionMessage) {
             // It should be safe to just send CompleteTransactionMessages to everyone.
             handleCompleteTransactionMessage((CompleteTransactionMessage)message);
-        }
-        else if (message instanceof DummyTransactionTaskMessage) {
-            handleIv2DumpSyncTaskMessage(needsRepair, (DummyTransactionTaskMessage)message);
         }
         else {
             throw new RuntimeException("SpScheduler.handleMessageRepair received unexpected message type: " +
@@ -1155,7 +1151,7 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
         }
     }
 
-    public void handleIv2DumpSyncTaskMessage(List<Long> needsRepair, DummyTransactionTaskMessage message)
+    public void handleDummyTransactionTaskMessage(DummyTransactionTaskMessage message)
     {
         DummyTransactionTaskMessage msg = message;
         long uniqueId, newSpHandle;
@@ -1169,9 +1165,6 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
             msg.setSpHandle(newSpHandle);
 
             if (m_sendToHSIds.length > 0) {
-                needsRepair.remove(m_mailbox.getHSId());
-                List<Long> expectedHSIds = new ArrayList<Long>(needsRepair);
-
                 DummyTransactionTaskMessage replmsg =
                         new DummyTransactionTaskMessage(
                                 m_mailbox.getHSId(),
@@ -1181,31 +1174,13 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
                 replmsg.setSpHandle(newSpHandle);
                 m_mailbox.send(m_sendToHSIds, replmsg);
 
-                if (expectedHSIds.size() != m_sendToHSIds.length) {
-                    Set<Long> set1 = new HashSet<Long>(expectedHSIds);
-                    Set<Long> set2 = new HashSet<Long>();
-                    for (int i = 0; i < m_sendToHSIds.length; i++) {
-                        set2.add(m_sendToHSIds[i]);
-                    }
-
-                    com.google_voltpatches.common.collect.Sets.SetView<Long> difference
-                        = com.google_voltpatches.common.collect.Sets.difference(set1, set2);
-
-                    if (!difference.isEmpty()) {
-                        throw new RuntimeException("[handleIv2DumpSyncTaskMessage] replica list is not the same,"
-                                + " pass in: " + set1.toString() + ", internal: " + set2.toString());
-                    }
-                }
-
                 DuplicateCounter counter = new DuplicateCounter(
                         HostMessenger.VALHALLA,
                         msg.getTxnId(),
                         m_replicaHSIds,
                         msg);
-
                 safeAddToDuplicateCounterMap(new DuplicateCounterKey(msg.getTxnId(), newSpHandle), counter);
             }
-
         } else {
             setMaxSeenTxnId(message.getSpHandle());
             newSpHandle = message.getSpHandle();
@@ -1216,7 +1191,7 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
         m_pendingTasks.offer(task);
     }
 
-    public void handleIv2DumpSyncTaskMessage(DummyTransactionResponseMessage message) {
+    public void handleDummyTransactionResponseMessage(DummyTransactionResponseMessage message) {
         final long spHandle = message.getSpHandle();
         final DuplicateCounterKey dcKey = new DuplicateCounterKey(message.getTxnId(), spHandle);
         DuplicateCounter counter = m_duplicateCounters.get(dcKey);
